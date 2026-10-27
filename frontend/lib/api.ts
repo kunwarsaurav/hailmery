@@ -8,8 +8,13 @@ export interface ProcessResult {
   processingTimeMs?: number;
 }
 
-const BACKEND_BASE =
-  process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
+const CANDIDATE_HOSTS = [
+  process.env.NEXT_PUBLIC_API_URL,
+  "http://127.0.0.1:8001",
+  "http://127.0.0.1:8000",
+  "http://localhost:8001",
+  "http://localhost:8000",
+].filter(Boolean) as string[];
 
 export async function processProductPhoto(
   photoBlob: Blob,
@@ -18,8 +23,11 @@ export async function processProductPhoto(
   const formData = new FormData();
   formData.append("file", photoBlob, fileName);
 
-  // Attempt direct backend endpoint first to avoid Next.js dev server timeout
-  const endpoints = [`${BACKEND_BASE}/api/process`, "/api/process"];
+  // Probe direct backend endpoints (8001, 8000) then local proxy
+  const endpoints = [
+    ...CANDIDATE_HOSTS.map((base) => `${base}/api/process`),
+    "/api/process",
+  ];
 
   let lastError: any = null;
 
@@ -60,7 +68,12 @@ export async function processProductPhoto(
     } catch (error: any) {
       lastError = error;
       // If it was a non-network error (e.g. 400 validation error from backend), throw immediately
-      if (error.message && !error.message.includes("fetch") && !error.message.includes("network")) {
+      if (
+        error.message &&
+        !error.message.includes("fetch") &&
+        !error.message.includes("network") &&
+        !error.message.includes("Failed to fetch")
+      ) {
         throw error;
       }
     }
@@ -68,34 +81,38 @@ export async function processProductPhoto(
 
   throw new Error(
     lastError?.message ||
-      "Could not connect to the ProductShot processing backend. Ensure the backend server is running on port 8000."
+      "Could not connect to the ProductShot processing backend. Ensure the backend server is running."
   );
 }
 
 export async function checkBackendHealth(): Promise<{ online: boolean; model?: string }> {
-  try {
-    const res = await fetch(`${BACKEND_BASE}/api/health`, {
-      method: "GET",
-      signal: AbortSignal.timeout(3000),
-    });
-    if (res.ok) {
-      const data = await res.json();
-      return { online: true, model: data.model };
-    }
-  } catch {
-    // Try fallback
+  for (const host of CANDIDATE_HOSTS) {
     try {
-      const resFallback = await fetch("/api/health", {
+      const res = await fetch(`${host}/api/health`, {
         method: "GET",
-        signal: AbortSignal.timeout(3000),
+        signal: AbortSignal.timeout(2000),
       });
-      if (resFallback.ok) {
-        const data = await resFallback.json();
+      if (res.ok) {
+        const data = await res.json();
         return { online: true, model: data.model };
       }
     } catch {
-      return { online: false };
+      // Continue to next host
     }
   }
+
+  try {
+    const resFallback = await fetch("/api/health", {
+      method: "GET",
+      signal: AbortSignal.timeout(2000),
+    });
+    if (resFallback.ok) {
+      const data = await resFallback.json();
+      return { online: true, model: data.model };
+    }
+  } catch {
+    return { online: false };
+  }
+
   return { online: false };
 }
