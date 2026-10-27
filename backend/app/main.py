@@ -2,16 +2,12 @@ import io
 import time
 import logging
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, File, UploadFile, HTTPException, Response
+from typing import Optional
+from fastapi import FastAPI, File, UploadFile, HTTPException, Response, Query
 from fastapi.middleware.cors import CORSMiddleware
 from PIL import Image, UnidentifiedImageError
 
-from app.services.background_removal import (
-    get_or_load_session,
-    warm_up_model,
-    remove_background,
-    DEFAULT_MODEL
-)
+import app.services.background_removal as bg_service
 from app.services.image_processing import composite_product_shot
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
@@ -21,8 +17,8 @@ logger = logging.getLogger("productshot.main")
 async def lifespan(app: FastAPI):
     # Startup: Load open-source model once and warm it up
     logger.info("Initializing ProductShot backend...")
-    get_or_load_session()
-    warm_up_model()
+    bg_service.get_or_load_session()
+    bg_service.warm_up_model()
     logger.info("ProductShot backend initialized and ready.")
     yield
     # Shutdown
@@ -30,7 +26,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="ProductShot API",
-    description="Minimal AI Product Photo background-removal and studio staging API",
+    description="High-Speed AI Product Photo background-removal and studio staging API",
     version="1.0.0",
     lifespan=lifespan
 )
@@ -50,16 +46,19 @@ async def health_check():
     return {
         "status": "online",
         "service": "ProductShot API",
-        "model": DEFAULT_MODEL,
+        "model": bg_service.DEFAULT_MODEL,
         "canvas_size": "1024x1024"
     }
 
 @app.post("/api/process")
-async def process_image(file: UploadFile = File(...)):
+async def process_image(
+    file: UploadFile = File(...),
+    model: Optional[str] = Query(None, description="Optional model override: isnet-general-use, u2netp, silueta, bria-rmbg")
+):
     """
     Main image processing endpoint:
     1. Receives uploaded product photo
-    2. Runs open-source background-removal model
+    2. Runs open-source background-removal model (optimized for ~1-2s speed)
     3. Finds product bounding box
     4. Centers and scales cleanly to canvas
     5. Casts subtle studio ground shadow
@@ -115,10 +114,11 @@ async def process_image(file: UploadFile = File(...)):
 
     # 3. Process image through AI background removal and studio staging
     try:
-        logger.info(f"Processing photo '{file.filename}' (dimensions: {input_img.size})...")
+        active_model = model or bg_service.DEFAULT_MODEL
+        logger.info(f"Processing photo '{file.filename}' (dimensions: {input_img.size}) using model: {active_model}...")
         
         # Step A: Background removal using open-source model
-        fg_cutout = remove_background(input_img)
+        fg_cutout = bg_service.remove_background(input_img, model_name=active_model)
         
         # Step B: Center, scale, realistic studio shadow, white canvas
         final_product_shot = composite_product_shot(
@@ -141,7 +141,7 @@ async def process_image(file: UploadFile = File(...)):
             media_type="image/jpeg",
             headers={
                 "X-Processing-Time-Ms": str(elapsed_ms),
-                "X-Model-Name": DEFAULT_MODEL,
+                "X-Model-Name": active_model,
                 "Content-Disposition": 'inline; filename="productshot.jpg"'
             }
         )

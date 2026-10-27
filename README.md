@@ -118,8 +118,8 @@ Visit **[http://localhost:3000](http://localhost:3000)** in your browser or mobi
 ### Backend (`backend/.env` or system environment):
 | Variable | Default | Description |
 |---|---|---|
-| `BG_MODEL` | `bria-rmbg` | Model to use. Options: `bria-rmbg` (highest product accuracy), `u2netp` (ultra-fast lightweight CPU model), or `u2net`. |
-| `PORT` | `8000` | Port for the FastAPI server. |
+| `BG_MODEL` | `isnet-general-use` | Active model. Options: `isnet-general-use` (~1.8s Studio HD), `u2netp` (~0.5s Instant), `silueta` (~1.7s), or `bria-rmbg`. |
+| `PORT` | `8000` / `8001` | Port for the FastAPI server (both supported out-of-the-box). |
 
 ### Frontend (`frontend/.env.local`):
 | Variable | Default | Description |

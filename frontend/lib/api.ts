@@ -18,15 +18,18 @@ const CANDIDATE_HOSTS = [
 
 export async function processProductPhoto(
   photoBlob: Blob,
-  fileName: string = "captured-product.jpg"
+  fileName: string = "captured-product.jpg",
+  model?: string
 ): Promise<ProcessResult> {
   const formData = new FormData();
   formData.append("file", photoBlob, fileName);
 
+  const query = model ? `?model=${encodeURIComponent(model)}` : "";
+
   // Probe direct backend endpoints (8001, 8000) then local proxy
   const endpoints = [
-    ...CANDIDATE_HOSTS.map((base) => `${base}/api/process`),
-    "/api/process",
+    ...CANDIDATE_HOSTS.map((base) => `${base}/api/process${query}`),
+    `/api/process${query}`,
   ];
 
   let lastError: any = null;
