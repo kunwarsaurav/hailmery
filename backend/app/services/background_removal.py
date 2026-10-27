@@ -58,11 +58,14 @@ def clean_alpha_specks(fg_image: Image.Image, min_area_ratio: float = 0.005) -> 
         fg_image = fg_image.convert("RGBA")
 
     alpha = np.array(fg_image.split()[-1])
-    mask = (alpha > 20).astype(np.uint8) * 255
+    # Zero out low-alpha boundary noise (table reflections, lens glare)
+    alpha[alpha < 35] = 0
+    mask = (alpha > 35).astype(np.uint8) * 255
 
     num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(mask, connectivity=8)
     
     if num_labels <= 1:
+        fg_image.putalpha(Image.fromarray(alpha))
         return fg_image
 
     total_pixels = fg_image.width * fg_image.height
@@ -70,10 +73,11 @@ def clean_alpha_specks(fg_image: Image.Image, min_area_ratio: float = 0.005) -> 
 
     areas = stats[1:, cv2.CC_STAT_AREA]
     if len(areas) == 0:
+        fg_image.putalpha(Image.fromarray(alpha))
         return fg_image
     
     max_area = np.max(areas)
-    valid_threshold = max(min_pixels, int(max_area * 0.05))
+    valid_threshold = max(min_pixels, int(max_area * 0.04))
 
     cleaned_alpha = alpha.copy()
     for i in range(1, num_labels):
@@ -102,13 +106,14 @@ def remove_background(image: Image.Image, max_dimension: int = 768, model_name: 
 
     session = get_or_load_session(model_name)
     
-    # Run open-source foreground extraction
+    # Run open-source foreground extraction with post-processing mask enabled
     fg_cutout = rembg.remove(
         processing_img,
         session=session,
-        alpha_matting=False
+        alpha_matting=False,
+        post_process_mask=True
     )
 
-    # Clean small floating specks if any
+    # Clean small floating specks and zero out boundary bleed
     fg_clean = clean_alpha_specks(fg_cutout)
     return fg_clean

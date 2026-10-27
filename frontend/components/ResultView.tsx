@@ -37,7 +37,7 @@ export default function ResultView({
       <div className="text-center mb-5">
         <div className="inline-flex items-center gap-1.5 px-3 py-1 bg-neutral-100 rounded-full text-xs font-medium text-neutral-700 mb-2">
           <Sparkles className="w-3.5 h-3.5 text-neutral-800" />
-          Studio Isolated & Balanced
+          Studio Enhanced & Staged
           {processingTimeMs && <span>• {(processingTimeMs / 1000).toFixed(1)}s</span>}
         </div>
         <h2 className="text-2xl font-bold tracking-tight text-neutral-900">
@@ -116,7 +116,7 @@ export default function ResultView({
 
       {/* Small Helper Tip */}
       <p className="text-xs text-neutral-400 mt-4 text-center">
-        High-resolution 1024×1024 with subtle studio ground shadow. Ready for store, catalog, or marketplace.
+        High-resolution 1024×1024 studio shot on pure white. Ready for store, catalog, or marketplace.
       </p>
     </div>
   );

@@ -41,6 +41,8 @@ app.add_middleware(
     expose_headers=["X-Processing-Time-Ms", "X-Model-Name"],
 )
 
+@app.get("/")
+@app.get("/health")
 @app.get("/api/health")
 async def health_check():
     return {
@@ -53,7 +55,8 @@ async def health_check():
 @app.post("/api/process")
 async def process_image(
     file: UploadFile = File(...),
-    model: Optional[str] = Query(None, description="Optional model override: isnet-general-use, u2netp, silueta, bria-rmbg")
+    model: Optional[str] = Query(None, description="Optional model override: isnet-general-use, u2netp, silueta, bria-rmbg"),
+    shadow: bool = Query(True, description="Add subtle studio ground shadow (default: True for grounded studio look)")
 ):
     """
     Main image processing endpoint:
@@ -61,9 +64,8 @@ async def process_image(
     2. Runs open-source background-removal model (optimized for ~1-2s speed)
     3. Finds product bounding box
     4. Centers and scales cleanly to canvas
-    5. Casts subtle studio ground shadow
-    6. Composites onto white background
-    7. Returns processed 1024x1024 JPEG
+    5. Composites onto pure plain white background (#FFFFFF)
+    6. Returns processed 1024x1024 JPEG
     """
     start_time = time.time()
     
@@ -115,17 +117,19 @@ async def process_image(
     # 3. Process image through AI background removal and studio staging
     try:
         active_model = model or bg_service.DEFAULT_MODEL
-        logger.info(f"Processing photo '{file.filename}' (dimensions: {input_img.size}) using model: {active_model}...")
+        logger.info(f"Processing photo '{file.filename}' (dimensions: {input_img.size}) using model: {active_model} (shadow={shadow})...")
         
         # Step A: Background removal using open-source model
         fg_cutout = bg_service.remove_background(input_img, model_name=active_model)
         
-        # Step B: Center, scale, realistic studio shadow, white canvas
+        # Step B: Center, scale, and composite onto pure plain white background
         final_product_shot = composite_product_shot(
             fg_image=fg_cutout,
             canvas_size=1024,
-            target_coverage=0.76,
-            bg_color=(255, 255, 255)
+            target_coverage=0.78,
+            bg_color=(255, 255, 255),
+            add_shadow=shadow,
+            auto_enhance=True
         )
         
         # Step C: Encode in-memory as high-quality JPEG

@@ -124,8 +124,19 @@ Visit **[http://localhost:3000](http://localhost:3000)** in your browser or mobi
 ### Frontend (`frontend/.env.local`):
 | Variable | Default | Description |
 |---|---|---|
-| `NEXT_PUBLIC_API_URL` | `http://127.0.0.1:8000` | Direct backend URL for client-side API requests. |
-| `BACKEND_URL` | `http://127.0.0.1:8000` | Target URL used by Next.js API proxy rewrites. |
+| `NEXT_PUBLIC_API_URL` | `""` (relative) | Optional direct backend URL override. Defaults to same-origin relative `/api`. |
+| `BACKEND_URL` | Injected by Vercel | Injected automatically at runtime via Vercel Services binding. In local dev defaults to `http://127.0.0.1:8001` or `8000`. |
+
+---
+
+## 🚀 Deploying to Vercel (Multi-Service Project)
+
+This repository is configured for [Vercel Services](https://vercel.com/docs/services) via the root [`vercel.json`](./vercel.json). Both the Next.js frontend and FastAPI backend deploy together within a single Vercel project with unified routing and internal service bindings.
+
+- **Frontend Service**: Next.js App Router (`frontend/`)
+- **Backend Service**: FastAPI (`backend/`)
+- **Internal Binding**: `BACKEND_URL` injected into the frontend service
+- **Local Testing**: Run `vercel dev` in the repository root to start all services with bindings injected.
 
 ---
 

@@ -13,6 +13,7 @@ type SpeedMode = "studio" | "instant";
 export default function Home() {
   const [step, setStep] = useState<AppStep>("camera");
   const [speedMode, setSpeedMode] = useState<SpeedMode>("studio");
+  const [addShadow, setAddShadow] = useState<boolean>(true);
   const [originalUrl, setOriginalUrl] = useState<string | null>(null);
   const [processedResult, setProcessedResult] = useState<ProcessResult | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -25,7 +26,7 @@ export default function Home() {
     setStep("processing");
 
     try {
-      const result = await processProductPhoto(blob, "camera-photo.jpg", activeModelParam);
+      const result = await processProductPhoto(blob, "camera-photo.jpg", activeModelParam, addShadow);
       setProcessedResult(result);
       setStep("result");
     } catch (err: any) {
@@ -46,7 +47,7 @@ export default function Home() {
     setStep("processing");
 
     try {
-      const result = await processProductPhoto(file, file.name, activeModelParam);
+      const result = await processProductPhoto(file, file.name, activeModelParam, addShadow);
       setProcessedResult(result);
       setStep("result");
     } catch (err: any) {
@@ -78,35 +79,53 @@ export default function Home() {
           ProductShot
         </h1>
         <p className="text-neutral-500 text-sm md:text-base mt-2 max-w-md mx-auto">
-          Turn a quick product photo into a clean product image.
+          Turn a quick product photo into a clean product image on a pure plain white background.
         </p>
 
-        {/* Speed / Quality Mode Switcher */}
+        {/* Controls: Speed Mode & Shadow Toggle */}
         {step === "camera" && (
-          <div className="inline-flex items-center gap-1 p-1 bg-neutral-100 rounded-full border border-neutral-200/80 mt-5 shadow-sm">
+          <div className="flex flex-wrap items-center justify-center gap-2 mt-5">
+            {/* Speed Mode Switcher */}
+            <div className="inline-flex items-center gap-1 p-1 bg-neutral-100 rounded-full border border-neutral-200/80 shadow-sm">
+              <button
+                type="button"
+                onClick={() => setSpeedMode("studio")}
+                className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold transition-all cursor-pointer ${
+                  speedMode === "studio"
+                    ? "bg-white text-neutral-950 shadow-sm"
+                    : "text-neutral-500 hover:text-neutral-900"
+                }`}
+              >
+                <Sparkles className="w-3.5 h-3.5 text-neutral-800" />
+                Studio HD (~1.8s)
+              </button>
+              <button
+                type="button"
+                onClick={() => setSpeedMode("instant")}
+                className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold transition-all cursor-pointer ${
+                  speedMode === "instant"
+                    ? "bg-white text-neutral-950 shadow-sm"
+                    : "text-neutral-500 hover:text-neutral-900"
+                }`}
+              >
+                <Zap className="w-3.5 h-3.5 text-amber-500" />
+                Instant (~0.5s)
+              </button>
+            </div>
+
+            {/* Background & Shadow Switcher */}
             <button
               type="button"
-              onClick={() => setSpeedMode("studio")}
-              className={`inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-xs font-semibold transition-all cursor-pointer ${
-                speedMode === "studio"
-                  ? "bg-white text-neutral-950 shadow-sm"
-                  : "text-neutral-500 hover:text-neutral-900"
+              onClick={() => setAddShadow(!addShadow)}
+              className={`inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-xs font-semibold transition-all cursor-pointer border ${
+                addShadow
+                  ? "bg-neutral-900 text-white border-neutral-900 shadow-sm"
+                  : "bg-neutral-50 text-neutral-700 border-neutral-200/80 hover:bg-neutral-100"
               }`}
+              title="Toggle between soft natural ambient drop shadow and 100% pure white background"
             >
-              <Sparkles className="w-3.5 h-3.5 text-neutral-800" />
-              Studio HD (~1.8s)
-            </button>
-            <button
-              type="button"
-              onClick={() => setSpeedMode("instant")}
-              className={`inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-xs font-semibold transition-all cursor-pointer ${
-                speedMode === "instant"
-                  ? "bg-white text-neutral-950 shadow-sm"
-                  : "text-neutral-500 hover:text-neutral-900"
-              }`}
-            >
-              <Zap className="w-3.5 h-3.5 text-amber-500" />
-              Instant (~0.5s)
+              <span className={`w-2 h-2 rounded-full ${addShadow ? "bg-emerald-400" : "bg-neutral-400"}`} />
+              {addShadow ? "Natural Ambient Shadow (On)" : "Pure White (Amazon Style)"}
             </button>
           </div>
         )}
@@ -152,7 +171,7 @@ export default function Home() {
       {/* Simple Footer */}
       <footer className="w-full max-w-2xl mx-auto text-center mt-8 pt-6 border-t border-neutral-100">
         <p className="text-xs text-neutral-400">
-          Fast open-source background removal • No cloud storage • Pure studio product photography
+          Fast open-source background removal • 100% Plain White Canvas (1024×1024) • No cloud storage
         </p>
       </footer>
     </main>
