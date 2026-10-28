@@ -1,9 +1,16 @@
 import os
+import tempfile
 import logging
+
+# Ensure model cache directory is writable in Serverless / Lambda environments (e.g. Vercel)
+# Lambda root filesystem is read-only; only /tmp is writable
+if "U2NET_HOME" not in os.environ:
+    os.environ["U2NET_HOME"] = os.path.join(tempfile.gettempdir(), ".u2net")
+
 import numpy as np
 from PIL import Image
+from scipy.ndimage import label
 import rembg
-import cv2
 import onnxruntime as ort
 
 logger = logging.getLogger("productshot.bg_removal")
@@ -53,6 +60,7 @@ def clean_alpha_specks(fg_image: Image.Image, min_area_ratio: float = 0.005) -> 
     """
     Removes tiny isolated floating alpha artifacts that don't belong to the product.
     Preserves all main connected components.
+    Uses pure scipy.ndimage (avoids heavy opencv dependency).
     """
     if fg_image.mode != "RGBA":
         fg_image = fg_image.convert("RGBA")
@@ -60,31 +68,33 @@ def clean_alpha_specks(fg_image: Image.Image, min_area_ratio: float = 0.005) -> 
     alpha = np.array(fg_image.split()[-1])
     # Zero out low-alpha boundary noise (table reflections, lens glare)
     alpha[alpha < 35] = 0
-    mask = (alpha > 35).astype(np.uint8) * 255
+    mask = alpha > 35
 
-    num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(mask, connectivity=8)
+    # 8-connectivity labeling using a 3x3 structuring element
+    labeled, num_labels = label(mask, structure=np.ones((3, 3), dtype=int))
     
     if num_labels <= 1:
         fg_image.putalpha(Image.fromarray(alpha))
         return fg_image
 
-    total_pixels = fg_image.width * fg_image.height
-    min_pixels = int(total_pixels * min_area_ratio)
-
-    areas = stats[1:, cv2.CC_STAT_AREA]
+    counts = np.bincount(labeled.ravel())
+    areas = counts[1:]  # areas for labels 1 to num_labels
     if len(areas) == 0:
         fg_image.putalpha(Image.fromarray(alpha))
         return fg_image
     
+    total_pixels = fg_image.width * fg_image.height
+    min_pixels = int(total_pixels * min_area_ratio)
+
     max_area = np.max(areas)
     valid_threshold = max(min_pixels, int(max_area * 0.04))
 
-    cleaned_alpha = alpha.copy()
-    for i in range(1, num_labels):
-        if stats[i, cv2.CC_STAT_AREA] < valid_threshold:
-            cleaned_alpha[labels == i] = 0
+    small_labels = np.where(areas < valid_threshold)[0] + 1
+    if len(small_labels) > 0:
+        remove_mask = np.isin(labeled, small_labels)
+        alpha[remove_mask] = 0
 
-    fg_image.putalpha(Image.fromarray(cleaned_alpha))
+    fg_image.putalpha(Image.fromarray(alpha))
     return fg_image
 
 def remove_background(image: Image.Image, max_dimension: int = 768, model_name: str = None) -> Image.Image:

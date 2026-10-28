@@ -1,0 +1,14 @@
+.git
+.github
+.qodo
+.vscode
+.idea
+README.md
+*.md
+**/*.pyc
+**/__pycache__
+**/.venv
+**/venv
+**/.u2net
+**/*.onnx
+**/.pytest_cache

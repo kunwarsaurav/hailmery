@@ -15,11 +15,14 @@ logger = logging.getLogger("productshot.main")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup: Load open-source model once and warm it up
+    # Startup: Attempt to load open-source model once and warm it up
     logger.info("Initializing ProductShot backend...")
-    bg_service.get_or_load_session()
-    bg_service.warm_up_model()
-    logger.info("ProductShot backend initialized and ready.")
+    try:
+        bg_service.get_or_load_session()
+        bg_service.warm_up_model()
+        logger.info("ProductShot backend initialized and ready.")
+    except Exception as e:
+        logger.warning(f"Startup model pre-warming deferred to first request: {e}")
     yield
     # Shutdown
     logger.info("ProductShot backend shutting down.")

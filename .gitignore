@@ -1,2 +1,46 @@
-.qodo
-__pycache__
+# Dependencies
+node_modules/
+.venv/
+venv/
+ENV/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+.pytest_cache/
+
+# Model caches & temp
+.u2net/
+*.onnx
+
+# Next.js
+frontend/.next/
+frontend/out/
+
+# IDE / Tools
+.qodo/
+.vscode/
+.idea/
+.DS_Store
+*.local
+.env
+.env.*
+!.env.example
