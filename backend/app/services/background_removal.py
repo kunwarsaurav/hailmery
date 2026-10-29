@@ -17,20 +17,31 @@ from scipy.ndimage import label, binary_dilation
 import rembg
 import onnxruntime as ort
 
+import gc
+
 logger = logging.getLogger("productshot.bg_removal")
 
-# High-performance, razor-sharp model (1.8s on CPU vs 34s for bria-rmbg)
-# Configurable via BG_MODEL: 'isnet-general-use', 'u2netp' (0.3s ultra-fast), 'silueta' (1.7s), or 'bria-rmbg'
-DEFAULT_MODEL = os.getenv("BG_MODEL", "isnet-general-use")
+# Serverless environment detection (Vercel / Lambda)
+is_serverless = bool(os.environ.get("VERCEL") or os.environ.get("AWS_LAMBDA_FUNCTION_NAME"))
+
+# Model configuration:
+# In Vercel serverless (default 1024MB RAM): 'silueta' (43MB model, ~590MB peak RAM) prevents OOM kills.
+# In local development or when explicitly configured via BG_MODEL: defaults to 'isnet-general-use'.
+DEFAULT_MODEL = os.getenv("BG_MODEL", "silueta" if is_serverless else "isnet-general-use")
 
 _sessions = {}
 
 def create_optimized_session(model_name: str):
-    """Creates a rembg session with multi-threaded CPU execution and graph optimizations."""
+    """Creates a rembg session with memory-bounded execution to prevent OOM kills."""
     opts = ort.SessionOptions()
-    # Use available CPU cores for intra-op parallelism
-    opts.intra_op_num_threads = min(8, os.cpu_count() or 4)
+    # In serverless environments, avoid thread over-allocation & disable arena hoarding
+    is_serverless_env = bool(os.environ.get("VERCEL") or os.environ.get("AWS_LAMBDA_FUNCTION_NAME"))
+    opts.intra_op_num_threads = 2 if is_serverless_env else min(4, os.cpu_count() or 2)
+    opts.inter_op_num_threads = 1
     opts.execution_mode = ort.ExecutionMode.ORT_SEQUENTIAL
+    
+    # Disable CPU memory arena hoarding so memory is promptly freed to the OS
+    opts.enable_cpu_mem_arena = False
     opts.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
     
     return rembg.new_session(model_name, session_options=opts)
@@ -146,11 +157,12 @@ def remove_background(
     session = get_or_load_session(model_name)
     
     # Run model to extract the raw grayscale alpha probability mask
+    # post_process_mask=False avoids 650MB+ duplicate morph buffers (we do our own anti-aliasing & clean specks)
     raw_mask = rembg.remove(
         proc_img,
         session=session,
         only_mask=True,
-        post_process_mask=True
+        post_process_mask=False
     )
 
     # Upscale alpha mask back to original native photo dimensions with bilinear filtering
@@ -160,6 +172,8 @@ def remove_background(
         full_res_mask = raw_mask
 
     alpha_arr = np.array(full_res_mask, dtype=np.float32)
+    del raw_mask
+    del full_res_mask
 
     # Continuous soft noise-floor ramp:
     # Instead of harsh step `alpha < 35 = 0`, map [noise_floor, 255] smoothly to [0, 255]
@@ -169,9 +183,12 @@ def remove_background(
 
     # Remove isolated floating specks while protecting main product boundaries
     alpha_clean = clean_alpha_specks(alpha_arr)
+    del alpha_arr
 
     # Apply the mask directly to the original uncompressed photo
     final_fg = orig_rgb.convert("RGBA")
     final_fg.putalpha(Image.fromarray(alpha_clean.astype(np.uint8)))
+    del alpha_clean
 
+    gc.collect()
     return final_fg

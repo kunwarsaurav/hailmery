@@ -18,7 +18,8 @@ export async function processProductPhoto(
   photoBlob: Blob,
   fileName: string = "captured-product.jpg",
   model?: string,
-  shadow: boolean = true
+  shadow: boolean = true,
+  enhance: boolean = true
 ): Promise<ProcessResult> {
   const formData = new FormData();
   formData.append("file", photoBlob, fileName);
@@ -26,6 +27,7 @@ export async function processProductPhoto(
   const params = new URLSearchParams();
   if (model) params.set("model", model);
   if (shadow) params.set("shadow", "true");
+  if (!enhance) params.set("enhance", "false");
   const queryString = params.toString() ? `?${params.toString()}` : "";
 
   const endpoint = getEndpoint("/api/process", queryString);

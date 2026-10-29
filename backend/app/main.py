@@ -59,7 +59,8 @@ async def health_check():
 async def process_image(
     file: UploadFile = File(...),
     model: Optional[str] = Query(None, description="Optional model override: isnet-general-use, u2netp, silueta, bria-rmbg"),
-    shadow: bool = Query(True, description="Add subtle studio ground shadow (default: True for grounded studio look)")
+    shadow: bool = Query(True, description="Add subtle studio ground shadow (default: True for grounded studio look)"),
+    enhance: bool = Query(True, description="Enable adaptive studio lighting and commercial clarity enhancement (default: True)")
 ):
     """
     Main image processing endpoint:
@@ -132,7 +133,7 @@ async def process_image(
             target_coverage=0.78,
             bg_color=(255, 255, 255),
             add_shadow=shadow,
-            auto_enhance=True
+            auto_enhance=enhance
         )
         
         # Step C: Encode in-memory as high-quality JPEG
@@ -140,6 +141,13 @@ async def process_image(
         final_product_shot.save(out_buffer, format="JPEG", quality=95, optimize=True)
         out_bytes = out_buffer.getvalue()
         
+        # Free memory immediately
+        del final_product_shot
+        del fg_cutout
+        del input_img
+        import gc
+        gc.collect()
+
         elapsed_ms = int((time.time() - start_time) * 1000)
         logger.info(f"Successfully processed '{file.filename}' in {elapsed_ms}ms. Output: {len(out_bytes)} bytes.")
 

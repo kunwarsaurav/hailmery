@@ -54,10 +54,15 @@ def decontaminate_edges(fg: Image.Image, solid_threshold: float = 210.0) -> Imag
 def enhance_product_cutout(fg: Image.Image) -> Image.Image:
     """
     Studio photo enhancement:
-    1. Adaptive gamma exposure correction (brightens underexposed camera shots without clipping highlights).
-    2. Studio contrast boost (1.15x) for deep blacks and clean whites.
-    3. Color vibrance boost (1.18x) to counteract flat indoor camera color casts.
-    4. Commercial clarity unsharp masking to bring out fine textures, logos, and materials.
+    1. Adaptive dynamic range & exposure recovery:
+       - Uses percentile-based histogram analysis (p95) rather than a blunt average luminance.
+       - Anchors the black point with a quadratic toe curve so dark/black products never
+         get washed out into milky gray.
+       - Gently recovers underexposed midtones and highlights without blowing out white products.
+    2. Subtle studio contrast boost (1.05x): Provides crisp commercial pop without crushing shadows.
+    3. Natural color fidelity (1.04x): Prevents oversaturating vibrant colors while adding subtle freshness.
+    4. Commercial clarity unsharp masking (threshold=8, radius=1.0, percent=70):
+       Sharpens fine textures, logos, stitching, and product details while ignoring digital camera sensor noise.
     """
     if fg.mode != "RGBA":
         fg = fg.convert("RGBA")
@@ -65,33 +70,83 @@ def enhance_product_cutout(fg: Image.Image) -> Image.Image:
     r, g, b, a = fg.split()
     alpha_arr = np.array(a)
 
-    # 1. Extract RGB channels (keep input alpha 'a' untouched to preserve smooth anti-aliasing)
     rgb = Image.merge("RGB", (r, g, b))
 
-    # 2. Analyze visible product pixels only
     mask = alpha_arr > 10
     if np.any(mask):
         arr = np.array(rgb, dtype=np.float32)
         vis = arr[mask]
-        mean_lum = 0.299 * vis[:, 0].mean() + 0.587 * vis[:, 1].mean() + 0.114 * vis[:, 2].mean()
+        lum = 0.299 * vis[:, 0] + 0.587 * vis[:, 1] + 0.114 * vis[:, 2]
+        p95 = np.percentile(lum, 95)
 
-        # Lift underexposed indoor camera shots with gentle gamma curve (preserves specular highlights)
-        if mean_lum < 165:
-            gamma = max(0.68, min(0.95, mean_lum / 175.0))
-            arr = 255.0 * np.power(np.clip(arr / 255.0, 0.0, 1.0), gamma)
-            rgb = Image.fromarray(np.clip(arr, 0, 255).astype(np.uint8))
+        # Lift underexposed indoor camera shots where highlights are compressed
+        # But protect deep blacks using toe curve: norm + (scale - 1) * norm^1.3
+        if 40.0 < p95 < 215.0:
+            target_scale = min(1.22, 230.0 / max(p95, 100.0))
+            norm = np.clip(arr / 255.0, 0.0, 1.0)
+            lift = (target_scale - 1.0) * (norm ** 1.3)
+            enhanced_arr = np.clip((norm + lift) * 255.0, 0.0, 255.0)
+            rgb = Image.fromarray(enhanced_arr.astype(np.uint8))
 
-    # 3. Boost Contrast
-    rgb = ImageEnhance.Contrast(rgb).enhance(1.15)
+    # Subtle studio contrast (crisp without crushing dark details)
+    rgb = ImageEnhance.Contrast(rgb).enhance(1.05)
 
-    # 4. Boost Color Vibrance
-    rgb = ImageEnhance.Color(rgb).enhance(1.18)
+    # Natural color vibrance (preserves color accuracy for e-commerce)
+    rgb = ImageEnhance.Color(rgb).enhance(1.04)
 
-    # 5. Apply Commercial Clarity Sharpening
-    rgb = rgb.filter(ImageFilter.UnsharpMask(radius=1.5, percent=120, threshold=2))
+    # Noise-aware commercial clarity (threshold 8 ignores mobile ISO noise)
+    rgb = rgb.filter(ImageFilter.UnsharpMask(radius=1.0, percent=70, threshold=8))
 
     r_n, g_n, b_n = rgb.split()
     return Image.merge("RGBA", (r_n, g_n, b_n, a))
+
+
+def create_studio_ground_shadow(
+    prod_alpha: Image.Image,
+    canvas_size: int,
+    pos_x: int,
+    pos_y: int,
+    new_w: int,
+    new_h: int
+) -> Image.Image:
+    """
+    Generates a realistic 3D studio tabletop shadow:
+    1. Ambient Ground Shadow: A horizontally projected, flattened shadow puddle
+       underneath the product base, simulating overhead softbox lighting.
+    2. Contact Occlusion Shadow: A tight, dense, dark shadow right along the contact
+       seam where the product physically touches the surface.
+    Unlike flat silhouette drop shadows, this does NOT float around the upper body or sides.
+    """
+    shadow_layer = Image.new("RGBA", (canvas_size, canvas_size), (0, 0, 0, 0))
+    base_y = pos_y + new_h
+
+    # 1. Soft Ambient Ground Shadow (flattened perspective puddle underneath base)
+    amb_w = max(1, int(new_w * 1.06))
+    amb_h = max(6, int(new_h * 0.18))
+    flat_alpha = prod_alpha.resize((amb_w, amb_h), Image.Resampling.BILINEAR)
+    amb_img = Image.new("RGBA", (amb_w, amb_h), (28, 30, 38, 0))
+    amb_alpha_arr = (np.array(flat_alpha, dtype=np.float32) * 0.22).astype(np.uint8)
+    amb_img.putalpha(Image.fromarray(amb_alpha_arr))
+
+    amb_x = pos_x - (amb_w - new_w) // 2
+    amb_y = base_y - int(amb_h * 0.40)
+    shadow_layer.paste(amb_img, (amb_x, amb_y), amb_img)
+    shadow_layer = shadow_layer.filter(ImageFilter.GaussianBlur(radius=max(8, int(canvas_size * 0.016))))
+
+    # 2. Contact Occlusion Shadow (tight, dense, anchored right where product touches table)
+    contact_w = new_w
+    contact_h = max(4, int(new_h * 0.06))
+    contact_flat = prod_alpha.resize((contact_w, contact_h), Image.Resampling.BILINEAR)
+    contact_img = Image.new("RGBA", (contact_w, contact_h), (18, 20, 26, 0))
+    contact_alpha_arr = (np.array(contact_flat, dtype=np.float32) * 0.48).astype(np.uint8)
+    contact_img.putalpha(Image.fromarray(contact_alpha_arr))
+
+    contact_layer = Image.new("RGBA", (canvas_size, canvas_size), (0, 0, 0, 0))
+    contact_y = base_y - int(contact_h * 0.50)
+    contact_layer.paste(contact_img, (pos_x, contact_y), contact_img)
+    contact_layer = contact_layer.filter(ImageFilter.GaussianBlur(radius=max(3, int(canvas_size * 0.005))))
+
+    return Image.alpha_composite(shadow_layer, contact_layer)
 
 
 def composite_product_shot(
@@ -108,8 +163,8 @@ def composite_product_shot(
     phones, keys, shoes, apparel, electronics, bottles, cosmetics, jewelry.
 
     - Places product on 100% pure studio white canvas (#FFFFFF).
-    - If add_shadow=True, applies a natural ambient contour drop shadow derived
-      directly from the product's actual silhouette (no artificial floor smudges).
+    - If add_shadow=True, applies a realistic dual-layer studio ground shadow
+      (ambient falloff + contact occlusion) anchored to the table plane.
     - If add_shadow=False, produces a pristine 100% pure flat white Amazon catalog cutout.
     """
     if fg_image.mode != "RGBA":
@@ -158,21 +213,17 @@ def composite_product_shot(
     # 6. Seamless Studio Canvas (Pure #FFFFFF)
     canvas = Image.new("RGBA", (canvas_size, canvas_size), (*bg_color, 255))
 
-    prod_alpha = product.split()[-1]
-
-    # 7. Natural Ambient Contour Shadow
+    # 7. Grounded Studio Contact & Ambient Shadow
     if add_shadow:
-        # Casts a soft, realistic ambient shadow hugging the EXACT product silhouette
-        shadow_layer = Image.new("RGBA", (canvas_size, canvas_size), (0, 0, 0, 0))
-        shadow_img = Image.new("RGBA", (new_w, new_h), (35, 38, 45, 0))
-        alpha_tint = (np.array(prod_alpha, dtype=np.float32) * 0.20).astype(np.uint8)
-        shadow_img.putalpha(Image.fromarray(alpha_tint))
-
-        # Gentle natural downward offset (simulates overhead studio softbox light)
-        offset_y = pos_y + max(4, int(canvas_size * 0.012))
-        shadow_layer.paste(shadow_img, (pos_x, offset_y), shadow_img)
-        shadow_layer = shadow_layer.filter(ImageFilter.GaussianBlur(radius=15))
-
+        prod_alpha = product.split()[-1]
+        shadow_layer = create_studio_ground_shadow(
+            prod_alpha=prod_alpha,
+            canvas_size=canvas_size,
+            pos_x=pos_x,
+            pos_y=pos_y,
+            new_w=new_w,
+            new_h=new_h
+        )
         canvas = Image.alpha_composite(canvas, shadow_layer)
 
     # 8. Composite enhanced product onto canvas
