@@ -16,15 +16,11 @@ def enhance_product_cutout(fg: Image.Image) -> Image.Image:
     r, g, b, a = fg.split()
     alpha_arr = np.array(a)
 
-    # 1. Defringe: Snap noisy boundary bleed to zero
-    alpha_arr[alpha_arr < 35] = 0
-    cleaned_alpha = Image.fromarray(alpha_arr)
-
-    # 2. Extract RGB channels
+    # 1. Extract RGB channels (keep input alpha 'a' untouched to preserve smooth anti-aliasing)
     rgb = Image.merge("RGB", (r, g, b))
 
-    # 3. Analyze visible product pixels only
-    mask = alpha_arr > 35
+    # 2. Analyze visible product pixels only
+    mask = alpha_arr > 10
     if np.any(mask):
         arr = np.array(rgb, dtype=np.float32)
         vis = arr[mask]
@@ -36,17 +32,17 @@ def enhance_product_cutout(fg: Image.Image) -> Image.Image:
             arr = 255.0 * np.power(np.clip(arr / 255.0, 0.0, 1.0), gamma)
             rgb = Image.fromarray(np.clip(arr, 0, 255).astype(np.uint8))
 
-    # 4. Boost Contrast
+    # 3. Boost Contrast
     rgb = ImageEnhance.Contrast(rgb).enhance(1.15)
 
-    # 5. Boost Color Vibrance
+    # 4. Boost Color Vibrance
     rgb = ImageEnhance.Color(rgb).enhance(1.18)
 
-    # 6. Apply Commercial Clarity Sharpening
+    # 5. Apply Commercial Clarity Sharpening
     rgb = rgb.filter(ImageFilter.UnsharpMask(radius=1.5, percent=120, threshold=2))
 
     r_n, g_n, b_n = rgb.split()
-    return Image.merge("RGBA", (r_n, g_n, b_n, cleaned_alpha))
+    return Image.merge("RGBA", (r_n, g_n, b_n, a))
 
 
 def composite_product_shot(
@@ -73,9 +69,9 @@ def composite_product_shot(
     if auto_enhance:
         fg_image = enhance_product_cutout(fg_image)
 
-    # 2. Defringe & Find tight bounding box of visible product
+    # 2. Find tight bounding box of visible product (threshold 10 preserves anti-aliased edge)
     alpha = np.array(fg_image.split()[-1])
-    coords = np.argwhere(alpha > 35)
+    coords = np.argwhere(alpha > 10)
     if coords.size == 0:
         bbox = (0, 0, fg_image.width, fg_image.height)
     else:
