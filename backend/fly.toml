@@ -1,0 +1,25 @@
+app = 'productshot-backend'
+primary_region = 'sin'  # Singapore — closest to India
+
+[build]
+  dockerfile = 'Dockerfile'
+
+[http_service]
+  internal_port = 8000
+  force_https = true
+  auto_stop_machines = false   # keep always-on — no cold starts
+  auto_start_machines = true
+  min_machines_running = 1
+  processes = ['app']
+
+[[vm]]
+  memory = '1gb'
+  cpu_kind = 'shared'
+  cpus = 1
+
+[env]
+  ORT_DISABLE_TELEMETRY = "1"
+  NUMBA_THREADING_LAYER = "workqueue"
+  NUMBA_CACHE_DIR = "/tmp/numba_cache"
+  MPLCONFIGDIR = "/tmp/matplotlib"
+  PORT = "8000"
