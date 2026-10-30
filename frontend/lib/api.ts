@@ -39,15 +39,23 @@ export async function processProductPhoto(
     });
 
     if (!response.ok) {
-      let errorMessage =
-        "Couldn't process this image. Try taking another photo with the product clearly visible.";
+      let errorMessage = `Processing failed (HTTP ${response.status}).`;
       try {
-        const errorData = await response.json();
-        if (errorData?.detail) {
-          errorMessage = errorData.detail;
+        const text = await response.text();
+        try {
+          const errorData = JSON.parse(text);
+          if (errorData?.detail) {
+            errorMessage = errorData.detail;
+          } else if (typeof errorData === "string") {
+            errorMessage = errorData;
+          }
+        } catch {
+          if (text) {
+            errorMessage = text.length > 150 ? `${text.slice(0, 150)}...` : text;
+          }
         }
       } catch {
-        // Keep generic message
+        // Fallback
       }
       throw new Error(errorMessage);
     }

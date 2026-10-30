@@ -19,7 +19,9 @@ async def lifespan(app: FastAPI):
     logger.info("Initializing ProductShot backend...")
     try:
         bg_service.get_or_load_session()
-        bg_service.warm_up_model()
+        # In serverless, avoid redundant dummy warmup to save ~3.5s on cold-start latency
+        if not bg_service.is_serverless:
+            bg_service.warm_up_model()
         logger.info("ProductShot backend initialized and ready.")
     except Exception as e:
         logger.warning(f"Startup model pre-warming deferred to first request: {e}")
