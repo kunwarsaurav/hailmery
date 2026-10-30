@@ -1,29 +1,39 @@
 FROM python:3.11-slim
 
-WORKDIR /app
+# Hugging Face Spaces runs containers as non-root user (uid 1000)
+RUN useradd -m -u 1000 user
+USER user
+ENV HOME=/home/user \
+    PATH=/home/user/.local/bin:$PATH \
+    U2NET_HOME=/home/user/.u2net
+
+WORKDIR /home/user/app
 
 # Install system dependencies for ONNX Runtime and image processing
+# (must be done before USER switch — use sudo-equivalent via root layer)
+USER root
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libgomp1 \
     libglib2.0-0 \
     libsm6 \
     libxext6 \
     && rm -rf /var/lib/apt/lists/*
+USER user
 
 # Copy and install Python dependencies first (layer caching)
-COPY requirements.txt .
+COPY --chown=user requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy application code
-COPY . .
+COPY --chown=user . .
 
 # Pre-download the silueta model at build time so it's baked into the image
-# Model is ~44MB and stored in /root/.u2net/
+# Stored at /home/user/.u2net/ (writable by non-root user)
 RUN python -c "from rembg import new_session; new_session('silueta'); print('Model baked into image.')"
 
-# Expose port (Railway injects PORT env var)
-EXPOSE 8000
+# Hugging Face Spaces uses port 7860; Railway/Fly uses $PORT (defaults to 8000)
+EXPOSE 7860
 
-# Start with uvicorn — single worker is enough (model loaded once in-process)
-CMD ["sh", "-c", "uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000} --workers 1 --timeout-keep-alive 75"]
+# PORT env var is injected by the host (7860 for HF Spaces, custom for Railway/Fly)
+CMD ["sh", "-c", "uvicorn main:app --host 0.0.0.0 --port ${PORT:-7860} --workers 1 --timeout-keep-alive 75"]
 
