@@ -1,5 +1,7 @@
 /**
  * API service for ProductShot backend
+ * NEXT_PUBLIC_API_URL should be set to the Railway backend URL, e.g.:
+ *   https://productshot-backend.up.railway.app
  */
 
 export interface ProcessResult {
@@ -8,6 +10,7 @@ export interface ProcessResult {
   processingTimeMs?: number;
 }
 
+// Railway backend URL — set via NEXT_PUBLIC_API_URL env var in Vercel project settings
 const API_BASE = (process.env.NEXT_PUBLIC_API_URL || "").replace(/\/$/, "");
 
 function getEndpoint(path: string, queryString: string = ""): string {
@@ -16,21 +19,12 @@ function getEndpoint(path: string, queryString: string = ""): string {
 
 export async function processProductPhoto(
   photoBlob: Blob,
-  fileName: string = "captured-product.jpg",
-  model?: string,
-  shadow: boolean = true,
-  enhance: boolean = true
+  fileName: string = "captured-product.jpg"
 ): Promise<ProcessResult> {
   const formData = new FormData();
   formData.append("file", photoBlob, fileName);
 
-  const params = new URLSearchParams();
-  if (model) params.set("model", model);
-  if (shadow) params.set("shadow", "true");
-  if (!enhance) params.set("enhance", "false");
-  const queryString = params.toString() ? `?${params.toString()}` : "";
-
-  const endpoint = getEndpoint("/api/process", queryString);
+  const endpoint = getEndpoint("/api/process");
 
   try {
     const response = await fetch(endpoint, {
@@ -46,16 +40,10 @@ export async function processProductPhoto(
           const errorData = JSON.parse(text);
           if (errorData?.detail) {
             errorMessage = errorData.detail;
-          } else if (typeof errorData === "string") {
-            errorMessage = errorData;
           }
         } catch {
-          if (text) {
-            if (text.includes("INTERNAL_FUNCTION_INVOCATION_FAILED")) {
-              errorMessage = "Server function cold start interrupted. Please tap 'Retry' or take another photo.";
-            } else {
-              errorMessage = text.length > 150 ? `${text.slice(0, 150)}...` : text;
-            }
+          if (text && text.length < 200) {
+            errorMessage = text;
           }
         }
       } catch {
@@ -66,14 +54,13 @@ export async function processProductPhoto(
 
     const contentType = response.headers.get("content-type") || "";
 
-    // 1. JSON Base64 response (standard for serverless reliability)
+    // 1. JSON Base64 response
     if (contentType.includes("application/json")) {
       const data = await response.json();
       const imageUrl = data.image?.startsWith("data:")
         ? data.image
         : `data:image/jpeg;base64,${data.image}`;
 
-      // Convert data URL to Blob for download / export compatibility
       let resultBlob: Blob;
       try {
         const blobRes = await fetch(imageUrl);
@@ -89,7 +76,7 @@ export async function processProductPhoto(
       };
     }
 
-    // 2. Binary JPEG response (fallback if client requested raw binary)
+    // 2. Binary JPEG response
     const timingHeader = response.headers.get("X-Processing-Time-Ms");
     const processingTimeMs = timingHeader
       ? parseInt(timingHeader, 10)
@@ -104,17 +91,9 @@ export async function processProductPhoto(
       processingTimeMs,
     };
   } catch (error: any) {
-    if (
-      error.message &&
-      !error.message.includes("fetch") &&
-      !error.message.includes("network") &&
-      !error.message.includes("Failed to fetch")
-    ) {
-      throw error;
-    }
     throw new Error(
       error?.message ||
-        "Could not connect to the ProductShot processing backend. Ensure the backend service is running."
+        "Could not connect to the ProductShot processing server. Please try again."
     );
   }
 }
@@ -123,7 +102,7 @@ export async function checkBackendHealth(): Promise<{ online: boolean; model?: s
   try {
     const res = await fetch(getEndpoint("/api/health"), {
       method: "GET",
-      signal: AbortSignal.timeout(3000),
+      signal: AbortSignal.timeout(5000),
     });
     if (res.ok) {
       const data = await res.json();

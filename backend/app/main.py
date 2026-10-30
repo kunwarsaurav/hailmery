@@ -30,17 +30,14 @@ logger = logging.getLogger("productshot.main")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup: Pre-load in local development for speed, but avoid blocking serverless startup
-    logger.info("Initializing ProductShot backend...")
-    if not bg_service.is_serverless:
-        try:
-            bg_service.get_or_load_session()
-            bg_service.warm_up_model()
-            logger.info("ProductShot backend initialized and ready.")
-        except Exception as e:
-            logger.warning(f"Startup model pre-warming deferred to first request: {e}")
-    else:
-        logger.info("ProductShot backend serverless container ready.")
+    # Startup: always pre-load model (persistent container on Railway)
+    logger.info("ProductShot backend starting — pre-loading AI model...")
+    try:
+        bg_service.get_or_load_session()
+        bg_service.warm_up_model()
+        logger.info("ProductShot backend initialized and ready.")
+    except Exception as e:
+        logger.warning(f"Model pre-warming deferred to first request: {e}")
     yield
     # Shutdown
     logger.info("ProductShot backend shutting down.")

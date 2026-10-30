@@ -1,14 +1,14 @@
 """
-Vercel / ASGI entrypoint for ProductShot FastAPI backend.
-Re-exports the FastAPI app from app.main.
+ASGI entrypoint for ProductShot FastAPI backend.
+Works on Railway (persistent container) and any ASGI host.
 """
 import os
 import warnings
 
-# 1. Disable ONNX Runtime telemetry to prevent container hang in serverless
+# Suppress ONNX telemetry write attempts (harmless but noisy)
 os.environ["ORT_DISABLE_TELEMETRY"] = "1"
 
-# 2. Prevent Numba from trying to lock /dev/shm (missing in Lambda/Vercel)
+# Prevent Numba from trying to lock /dev/shm
 os.environ["NUMBA_THREADING_LAYER"] = "workqueue"
 os.environ["NUMBA_CACHE_DIR"] = "/tmp/numba_cache"
 os.environ["MPLCONFIGDIR"] = "/tmp/matplotlib"
