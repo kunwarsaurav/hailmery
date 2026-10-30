@@ -37,7 +37,8 @@ async function forwardRequest(request: NextRequest) {
     });
 
     const responseHeaders = new Headers(response.headers);
-    return new NextResponse(response.body, {
+    const buffer = await response.arrayBuffer();
+    return new NextResponse(buffer, {
       status: response.status,
       statusText: response.statusText,
       headers: responseHeaders,

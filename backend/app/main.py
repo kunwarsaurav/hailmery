@@ -1,5 +1,20 @@
+import os
+import sys
+import warnings
+
+# 1. Disable ONNX Runtime telemetry to prevent container hang in serverless
+os.environ["ORT_DISABLE_TELEMETRY"] = "1"
+
+# 2. Prevent Numba from trying to lock /dev/shm (missing in Lambda/Vercel)
+os.environ["NUMBA_THREADING_LAYER"] = "workqueue"
+os.environ["NUMBA_CACHE_DIR"] = "/tmp/numba_cache"
+os.environ["MPLCONFIGDIR"] = "/tmp/matplotlib"
+
+warnings.filterwarnings("ignore", message="Could not obtain multiprocessing lock")
+
 import io
 import time
+import base64
 import logging
 from contextlib import asynccontextmanager
 from typing import Optional
@@ -15,16 +30,17 @@ logger = logging.getLogger("productshot.main")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup: Attempt to load open-source model once and warm it up
+    # Startup: Pre-load in local development for speed, but avoid blocking serverless startup
     logger.info("Initializing ProductShot backend...")
-    try:
-        bg_service.get_or_load_session()
-        # In serverless, avoid redundant dummy warmup to save ~3.5s on cold-start latency
-        if not bg_service.is_serverless:
+    if not bg_service.is_serverless:
+        try:
+            bg_service.get_or_load_session()
             bg_service.warm_up_model()
-        logger.info("ProductShot backend initialized and ready.")
-    except Exception as e:
-        logger.warning(f"Startup model pre-warming deferred to first request: {e}")
+            logger.info("ProductShot backend initialized and ready.")
+        except Exception as e:
+            logger.warning(f"Startup model pre-warming deferred to first request: {e}")
+    else:
+        logger.info("ProductShot backend serverless container ready.")
     yield
     # Shutdown
     logger.info("ProductShot backend shutting down.")
@@ -57,12 +73,14 @@ async def health_check():
         "canvas_size": "1024x1024"
     }
 
+@app.post("/process")
 @app.post("/api/process")
 async def process_image(
     file: UploadFile = File(...),
     model: Optional[str] = Query(None, description="Optional model override: isnet-general-use, u2netp, silueta, bria-rmbg"),
     shadow: bool = Query(True, description="Add subtle studio ground shadow (default: True for grounded studio look)"),
-    enhance: bool = Query(True, description="Enable adaptive studio lighting and commercial clarity enhancement (default: True)")
+    enhance: bool = Query(True, description="Enable adaptive studio lighting and commercial clarity enhancement (default: True)"),
+    format: Optional[str] = Query(None, description="Response format: 'json' (default for web/serverless) or 'binary'")
 ):
     """
     Main image processing endpoint:
@@ -71,7 +89,7 @@ async def process_image(
     3. Finds product bounding box
     4. Centers and scales cleanly to canvas
     5. Composites onto pure plain white background (#FFFFFF)
-    6. Returns processed 1024x1024 JPEG
+    6. Returns clean studio staged photo (JSON Base64 for serverless resilience or raw JPEG)
     """
     start_time = time.time()
     
@@ -153,15 +171,28 @@ async def process_image(
         elapsed_ms = int((time.time() - start_time) * 1000)
         logger.info(f"Successfully processed '{file.filename}' in {elapsed_ms}ms. Output: {len(out_bytes)} bytes.")
 
-        return Response(
-            content=out_bytes,
-            media_type="image/jpeg",
-            headers={
-                "X-Processing-Time-Ms": str(elapsed_ms),
-                "X-Model-Name": active_model,
-                "Content-Disposition": 'inline; filename="productshot.jpg"'
-            }
-        )
+        # If client explicitly requested binary, return raw JPEG
+        if format == "binary":
+            return Response(
+                content=out_bytes,
+                media_type="image/jpeg",
+                headers={
+                    "X-Processing-Time-Ms": str(elapsed_ms),
+                    "X-Model-Name": active_model,
+                    "Content-Disposition": 'inline; filename="productshot.jpg"'
+                }
+            )
+
+        # Default for serverless reliability: return JSON containing base64 data URL
+        # Completely immune to ASGI bridge binary serialization failures
+        b64_encoded = base64.b64encode(out_bytes).decode("ascii")
+        return {
+            "success": True,
+            "image": f"data:image/jpeg;base64,{b64_encoded}",
+            "processing_time_ms": elapsed_ms,
+            "model": active_model,
+            "bytes_length": len(out_bytes)
+        }
 
     except Exception as e:
         logger.error(f"Image processing pipeline failed: {e}", exc_info=True)

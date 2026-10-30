@@ -51,7 +51,11 @@ export async function processProductPhoto(
           }
         } catch {
           if (text) {
-            errorMessage = text.length > 150 ? `${text.slice(0, 150)}...` : text;
+            if (text.includes("INTERNAL_FUNCTION_INVOCATION_FAILED")) {
+              errorMessage = "Server function cold start interrupted. Please tap 'Retry' or take another photo.";
+            } else {
+              errorMessage = text.length > 150 ? `${text.slice(0, 150)}...` : text;
+            }
           }
         }
       } catch {
@@ -60,6 +64,32 @@ export async function processProductPhoto(
       throw new Error(errorMessage);
     }
 
+    const contentType = response.headers.get("content-type") || "";
+
+    // 1. JSON Base64 response (standard for serverless reliability)
+    if (contentType.includes("application/json")) {
+      const data = await response.json();
+      const imageUrl = data.image?.startsWith("data:")
+        ? data.image
+        : `data:image/jpeg;base64,${data.image}`;
+
+      // Convert data URL to Blob for download / export compatibility
+      let resultBlob: Blob;
+      try {
+        const blobRes = await fetch(imageUrl);
+        resultBlob = await blobRes.blob();
+      } catch {
+        resultBlob = new Blob([], { type: "image/jpeg" });
+      }
+
+      return {
+        blob: resultBlob,
+        imageUrl,
+        processingTimeMs: data.processing_time_ms,
+      };
+    }
+
+    // 2. Binary JPEG response (fallback if client requested raw binary)
     const timingHeader = response.headers.get("X-Processing-Time-Ms");
     const processingTimeMs = timingHeader
       ? parseInt(timingHeader, 10)
